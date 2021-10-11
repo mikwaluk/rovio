@@ -107,6 +107,8 @@ class FeatureTrackerNode{
    *  @param img_msg - Image message (ros)
    */
   void imgCallback(const sensor_msgs::ImageConstPtr & img_msg){
+    const clock_t begin_time = clock();
+
     // Get image from msg
     cv_bridge::CvImagePtr cv_ptr;
     try {
@@ -256,8 +258,10 @@ class FeatureTrackerNode{
     cv::imshow("Patches", draw_patches_);
     cv::waitKey(30);
     last_time = current_time;
+    ROS_INFO_STREAM("Feature tracker time: " << std::to_string(float(clock() - begin_time ) /  CLOCKS_PER_SEC));
   }
 };
+
 }
 
 

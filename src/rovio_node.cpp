@@ -43,11 +43,11 @@
 #ifdef MAKE_SCENE
 #include "rovio/RovioScene.hpp"
 #endif
-
+#define ROVIO_NMAXFEATURE 40
 #ifdef ROVIO_NMAXFEATURE
 static constexpr int nMax_ = ROVIO_NMAXFEATURE;
 #else
-static constexpr int nMax_ = 25; // Maximal number of considered features in the filter state.
+static constexpr int nMax_ = 40; // Maximal number of considered features in the filter state.
 #endif
 
 #ifdef ROVIO_NLEVELS

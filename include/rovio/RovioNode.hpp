@@ -35,10 +35,12 @@
 
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/Pose.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/TwistWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
@@ -137,6 +139,7 @@ class RovioNode{
   ros::ServiceServer srvResetFilter_;
   ros::ServiceServer srvResetToPoseFilter_;
   ros::Publisher pubOdometry_;
+  ros::Publisher pubOdomPath_;
   ros::Publisher pubTransform_;
   ros::Publisher pubPoseWithCovStamped_;
   ros::Publisher pub_T_J_W_transform;
@@ -183,6 +186,9 @@ class RovioNode{
   std::string camera_frame_;
   std::string imu_frame_;
 
+
+  std::vector<geometry_msgs::PoseStamped> poses_odom_;
+
   /** \brief Constructor
    */
   RovioNode(ros::NodeHandle& nh, ros::NodeHandle& nh_private, std::shared_ptr<mtFilter> mpFilter)
@@ -194,7 +200,7 @@ class RovioNode{
     #endif
     mpImgUpdate_ = &std::get<0>(mpFilter_->mUpdates_);
     mpPoseUpdate_ = &std::get<1>(mpFilter_->mUpdates_);
-    forceOdometryPublishing_ = false;
+    forceOdometryPublishing_ = true;
     forcePoseWithCovariancePublishing_ = false;
     forceTransformPublishing_ = false;
     forceExtrinsicsPublishing_ = false;
@@ -219,6 +225,7 @@ class RovioNode{
     // Advertise topics
     pubTransform_ = nh_.advertise<geometry_msgs::TransformStamped>("rovio/transform", 1);
     pubOdometry_ = nh_.advertise<nav_msgs::Odometry>("rovio/odometry", 1);
+    pubOdomPath_ = nh_.advertise<nav_msgs::Path>("rovio/odometry_path", 1);
     pubPoseWithCovStamped_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("rovio/pose_with_covariance_stamped", 1);
     pubPcl_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/pcl", 1);
     pubPatch_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/patch", 1);
@@ -439,6 +446,7 @@ class RovioNode{
   /** \brief Callback for IMU-Messages. Adds IMU measurements (as prediction measurements) to the filter.
    */
   void imuCallback(const sensor_msgs::Imu::ConstPtr& imu_msg){
+    const double t_start = (double) cv::getTickCount();
     std::lock_guard<std::mutex> lock(m_filter_);
     predictionMeas_.template get<mtPredictionMeas::_acc>() = Eigen::Vector3d(imu_msg->linear_acceleration.x,imu_msg->linear_acceleration.y,imu_msg->linear_acceleration.z);
     predictionMeas_.template get<mtPredictionMeas::_gyr>() = Eigen::Vector3d(imu_msg->angular_velocity.x,imu_msg->angular_velocity.y,imu_msg->angular_velocity.z);
@@ -468,6 +476,7 @@ class RovioNode{
       std::cout << "-- Filter: Initialized at t = " << imu_msg->header.stamp.toSec() << std::endl;
       init_state_.state_ = FilterInitializationState::State::Initialized;
     }
+    //ROS_INFO_STREAM("IMU callback duration: " << ((double) cv::getTickCount()-t_start)/cv::getTickFrequency()*1000 << " ms");
   }
 
   /** \brief Image callback for the camera with ID 0
@@ -476,8 +485,10 @@ class RovioNode{
    * @todo generalize
    */
   void imgCallback0(const sensor_msgs::ImageConstPtr & img){
+    const double t_start = (double) cv::getTickCount();
     std::lock_guard<std::mutex> lock(m_filter_);
     imgCallback(img,0);
+    //ROS_INFO_STREAM("Image callback duration: " << ((double) cv::getTickCount()-t_start)/cv::getTickFrequency()*1000 << " ms");
   }
 
   /** \brief Image callback for the camera with ID 1
@@ -755,6 +766,20 @@ class RovioNode{
             }
           }
           pubOdometry_.publish(odometryMsg_);
+          
+          geometry_msgs::PoseStamped posetemp;
+          posetemp.header = odometryMsg_.header;
+          posetemp.pose = odometryMsg_.pose.pose;
+          poses_odom_.push_back(posetemp);
+          // NOTE: Downsample the number of poses as needed to prevent rviz crashes
+          // NOTE: https://github.com/ros-visualization/rviz/issues/1107
+          nav_msgs::Path pathMsg;
+          pathMsg.header = posetemp.header;
+          for (size_t i = 0; i < poses_odom_.size(); i += std::floor(poses_odom_.size() / 16384.0) + 1) {
+            pathMsg.poses.push_back(poses_odom_.at(i));
+          }
+          pubOdomPath_.publish(pathMsg);
+          
         }
 
         if(pubPoseWithCovStamped_.getNumSubscribers() > 0 || forcePoseWithCovariancePublishing_){
